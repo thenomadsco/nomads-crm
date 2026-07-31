@@ -153,16 +153,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
 					pushEventRef.current(isHot ? "hot_lead" : "new_lead", notifTitle, notifBody);
 
 					// Native OS notification (works when app is backgrounded)
-					if (typeof Notification !== "undefined" && Notification.permission === "granted" && "serviceWorker" in navigator) {
-						navigator.serviceWorker.ready.then((reg) => {
-							reg.showNotification(notifTitle, {
-								body: notifBody,
-								icon: "/icons/icon-192.png",
-								badge: "/icons/icon-192.png",
-								tag: "new-lead",
-								renotify: true,
+					if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+						if ("serviceWorker" in navigator) {
+							navigator.serviceWorker.ready.then((reg) => {
+								reg.showNotification(notifTitle, {
+									body: notifBody,
+									icon: "/icons/icon-192.png",
+									badge: "/icons/icon-192.png",
+									tag: "new-lead",
+									renotify: true,
+								});
+							}).catch(() => {
+								new Notification(notifTitle, { body: notifBody, icon: "/icons/icon-192.png" });
 							});
-						}).catch(() => {});
+						} else {
+							new Notification(notifTitle, { body: notifBody, icon: "/icons/icon-192.png" });
+						}
 					}
 				},
 			)
