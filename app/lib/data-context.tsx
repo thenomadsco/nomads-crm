@@ -16,6 +16,7 @@ import type {
 } from "./mock-data";
 import {
 	fetchLeads,
+	fetchLeadsSince,
 	fetchTasks,
 	fetchBookedTrips,
 	fetchBookingItems,
@@ -190,6 +191,52 @@ export function DataProvider({ children }: { children: ReactNode }) {
 			if (retryTimer) clearTimeout(retryTimer);
 			if (currentChannel) supabase.removeChannel(currentChannel);
 		};
+	}, []);
+
+	// Polling fallback — catches new leads every 15s regardless of Realtime status
+	useEffect(() => {
+		// Track the newest lead timestamp seen so far
+		const latestRef = { current: new Date().toISOString() };
+
+		const poll = async () => {
+			try {
+				const newLeads = await fetchLeadsSince(latestRef.current);
+				if (newLeads.length === 0) return;
+				// Update timestamp to newest we've seen
+				latestRef.current = newLeads[0].created_at;
+				const enriched = newLeads.map((l) => ({
+					...l,
+					lead_score: l.lead_score ?? computeLeadScore(l),
+				}));
+				setLeads((prev) => {
+					const currentIds = new Set(prev.map((l) => l.id));
+					const added = enriched.filter((l) => !currentIds.has(l.id));
+					if (added.length === 0) return prev;
+					// Fire notifications for each genuinely new lead
+					added.forEach((lead) => {
+						const score = lead.lead_score ?? 0;
+						const isHot = score >= 75;
+						const dest = [lead.destination, lead.trip_category].filter(Boolean).join(" · ");
+						const title = isHot ? `Hot lead: ${lead.name || "New lead"}` : `New lead: ${lead.name || "Unknown"}`;
+						const body = `Scored ${score}${dest ? ` · ${dest}` : ""}`;
+						pushEventRef.current(isHot ? "hot_lead" : "new_lead", title, body);
+						if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+							if ("serviceWorker" in navigator) {
+								navigator.serviceWorker.ready.then((reg) =>
+									reg.showNotification(title, { body, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", tag: "new-lead", renotify: true })
+								).catch(() => new Notification(title, { body }));
+							} else {
+								new Notification(title, { body });
+							}
+						}
+					});
+					return [...added, ...prev];
+				});
+			} catch { /* silent — polling is a fallback */ }
+		};
+
+		const interval = setInterval(poll, 15000);
+		return () => clearInterval(interval);
 	}, []);
 
 	return (

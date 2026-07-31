@@ -35,6 +35,18 @@ export async function fetchLeads(): Promise<Lead[]> {
 	return (data ?? []) as Lead[];
 }
 
+export async function fetchLeadsSince(since: string): Promise<Lead[]> {
+	const { data, error } = await supabase
+		.from("leads")
+		.select("*")
+		.gt("created_at", since)
+		.is("deleted_at", null)
+		.or("is_test.is.null,is_test.eq.false")
+		.order("created_at", { ascending: false });
+	if (error) throw new Error(`fetchLeadsSince: ${error.message}`);
+	return (data ?? []) as Lead[];
+}
+
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export async function fetchTasks(): Promise<Task[]> {
