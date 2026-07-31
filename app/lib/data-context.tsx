@@ -52,6 +52,8 @@ type DataState = {
 	// Local-only mutations (optimistic update in context, persisted to Supabase via db.ts)
 	setLeads: (leads: Lead[]) => void;
 	setTasks: (tasks: Task[]) => void;
+	setBookedTrips: (trips: BookedTrip[]) => void;
+	setVisaApplications: (visas: VisaApplication[]) => void;
 	setQuotes: (quotes: Quote[]) => void;
 	refetch: () => Promise<void>;
 };
@@ -175,6 +177,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
 				error,
 				setLeads,
 				setTasks,
+				setBookedTrips,
+				setVisaApplications,
 				setQuotes,
 				refetch: load,
 			}}

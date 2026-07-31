@@ -6,7 +6,7 @@ import { Card } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
 import { useAuth } from "~/lib/auth-context";
 import { useData } from "~/lib/data-context";
-import { today } from "~/lib/mock-data";
+import { today, daysUntil } from "~/lib/mock-data";
 
 export default function Dashboard() {
 	const { user } = useAuth();
@@ -22,7 +22,11 @@ function OperationalDashboard() {
 	const hotLeads = leads.filter((l) => (l.lead_score ?? -1) >= 75).length;
 	const openTasks = tasks.filter((t) => t.status === "Open").length;
 	const dueToday = tasks.filter((t) => t.status === "Open" && t.due_date === todayStr);
-	const expiringVisas = visaApplications.filter((v) => v.status === "Approved" && v.expiry_date);
+	const expiringVisas = visaApplications.filter((v) => {
+		if (v.status !== "Approved" || !v.expiry_date) return false;
+		const days = daysUntil(v.expiry_date);
+		return days >= 0 && days <= 60;
+	});
 
 	return (
 		<div className="mx-auto max-w-6xl space-y-8">

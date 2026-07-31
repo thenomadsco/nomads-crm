@@ -1,16 +1,23 @@
 import { useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { ExternalLink, Search } from "lucide-react";
+import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
 import { Input } from "~/components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "~/components/ui/select";
 import { useData } from "~/lib/data-context";
-
-// Invoice data lives on booked_trips (invoice_number, total_invoice_value, amount_paid,
-// balance_due, payment_status). Only show trips that have an invoice number assigned.
+import { updateBooking } from "~/lib/db";
 
 type PaymentStatusFilter = "All" | "Paid" | "Partial" | "Unpaid";
+type PaymentStatus = "Paid" | "Partial" | "Unpaid";
 
 const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
 	Paid: "default",
@@ -19,11 +26,11 @@ const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline
 };
 
 export default function Invoices() {
-	const { bookedTrips, loading } = useData();
+	const { bookedTrips, setBookedTrips, loading } = useData();
 	const [filter, setFilter] = useState<PaymentStatusFilter>("All");
 	const [query, setQuery] = useState("");
+	const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-	// Only show trips with an invoice number
 	const invoiced = useMemo(
 		() => bookedTrips.filter((b) => Boolean(b.invoice_number)),
 		[bookedTrips],
@@ -45,6 +52,21 @@ export default function Invoices() {
 
 	const totalValue = invoiced.reduce((s, b) => s + (b.total_invoice_value ?? 0), 0);
 	const totalBalance = invoiced.reduce((s, b) => s + (b.balance_due ?? 0), 0);
+
+	async function handlePaymentStatusChange(id: string, paymentStatus: PaymentStatus) {
+		setUpdatingId(id);
+		const prev = bookedTrips.find((b) => b.id === id)?.payment_status;
+		setBookedTrips(bookedTrips.map((b) => b.id === id ? { ...b, payment_status: paymentStatus } : b));
+		try {
+			await updateBooking(id, { payment_status: paymentStatus });
+			toast.success(`Payment status updated to ${paymentStatus}`);
+		} catch (e) {
+			setBookedTrips(bookedTrips.map((b) => b.id === id ? { ...b, payment_status: prev ?? b.payment_status } : b));
+			toast.error("Failed to update payment status", { description: String(e) });
+		} finally {
+			setUpdatingId(null);
+		}
+	}
 
 	return (
 		<div className="mx-auto max-w-6xl space-y-6">
@@ -123,7 +145,24 @@ export default function Invoices() {
 									)}
 								</TableCell>
 								<TableCell>
-									<Badge variant={VARIANT[b.payment_status] ?? "outline"}>{b.payment_status}</Badge>
+									<Select
+										value={b.payment_status}
+										disabled={updatingId === b.id}
+										onValueChange={(v) => handlePaymentStatusChange(b.id, v as PaymentStatus)}
+									>
+										<SelectTrigger className="h-7 w-28 text-xs">
+											<SelectValue>
+												<Badge variant={VARIANT[b.payment_status] ?? "outline"} className="pointer-events-none">
+													{b.payment_status}
+												</Badge>
+											</SelectValue>
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Unpaid">Unpaid</SelectItem>
+											<SelectItem value="Partial">Partial</SelectItem>
+											<SelectItem value="Paid">Paid</SelectItem>
+										</SelectContent>
+									</Select>
 								</TableCell>
 								<TableCell className="text-muted-foreground">{b.booking_date ?? "—"}</TableCell>
 								<TableCell>

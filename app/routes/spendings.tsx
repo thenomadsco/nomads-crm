@@ -1,17 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { motion } from "motion/react";
 import { ArrowDownLeft, Info } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
 import { StatCard } from "~/components/stat-card";
 import { useData } from "~/lib/data-context";
 
-type Direction = "All" | "In";
-
 export default function Spendings() {
 	const { payments, bookedTrips, loading } = useData();
-	const [filter, setFilter] = useState<Direction>("All");
 
 	const ledger = useMemo(() => {
 		return payments
@@ -25,7 +21,6 @@ export default function Spendings() {
 					date: p.payment_date ?? p.created_at.slice(0, 10),
 					description: `${clientName}${dest ? ` · ${dest}` : ""}`,
 					subtext: p.method ?? "Payment",
-					direction: "In" as const,
 					amount: p.amount,
 					paid,
 				};
@@ -36,8 +31,6 @@ export default function Spendings() {
 	const paidIn = payments.filter((p) => p.payment_date !== null).reduce((s, p) => s + p.amount, 0);
 	const pendingIn = payments.filter((p) => p.payment_date === null).reduce((s, p) => s + p.amount, 0);
 
-	const filtered = filter === "All" ? ledger : ledger.filter((e) => e.direction === filter);
-
 	return (
 		<div className="mx-auto max-w-6xl space-y-6">
 			<div>
@@ -46,25 +39,17 @@ export default function Spendings() {
 			</div>
 
 			<div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-				<StatCard label="Money In (Received)" value={`₹${paidIn.toLocaleString("en-IN")}`} icon={ArrowDownLeft} accent="accent" />
-				<StatCard label="Pending Collection" value={`₹${pendingIn.toLocaleString("en-IN")}`} icon={ArrowDownLeft} accent="destructive" delay={0.05} />
-				<StatCard label="Total Billed" value={`₹${(paidIn + pendingIn).toLocaleString("en-IN")}`} icon={ArrowDownLeft} delay={0.1} />
+				<StatCard label="Money In (Received)" value={loading ? "—" : `₹${paidIn.toLocaleString("en-IN")}`} icon={ArrowDownLeft} accent="accent" />
+				<StatCard label="Pending Collection" value={loading ? "—" : `₹${pendingIn.toLocaleString("en-IN")}`} icon={ArrowDownLeft} accent="destructive" delay={0.05} />
+				<StatCard label="Total Billed" value={loading ? "—" : `₹${(paidIn + pendingIn).toLocaleString("en-IN")}`} icon={ArrowDownLeft} delay={0.1} />
 			</div>
 
-			{/* Company card spend note */}
 			<div className="flex items-start gap-2 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
 				<Info className="mt-0.5 h-4 w-4 shrink-0" />
 				<p>
 					Company card spend (outgoing expenses) is not yet tracked in the database. This ledger shows only incoming client payments.
 				</p>
 			</div>
-
-			<Tabs value={filter} onValueChange={(v) => setFilter(v as Direction)}>
-				<TabsList>
-					<TabsTrigger value="All">All Payments</TabsTrigger>
-					<TabsTrigger value="In">Received Only</TabsTrigger>
-				</TabsList>
-			</Tabs>
 
 			<motion.div
 				initial={{ opacity: 0, y: 8 }}
@@ -90,7 +75,7 @@ export default function Spendings() {
 								</TableCell>
 							</TableRow>
 						)}
-						{!loading && filtered.map((e) => (
+						{!loading && ledger.map((e) => (
 							<TableRow key={e.id}>
 								<TableCell className="text-muted-foreground">{e.date}</TableCell>
 								<TableCell className="font-medium">{e.description}</TableCell>
@@ -105,7 +90,7 @@ export default function Spendings() {
 								</TableCell>
 							</TableRow>
 						))}
-						{!loading && filtered.length === 0 && (
+						{!loading && ledger.length === 0 && (
 							<TableRow>
 								<TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
 									No payment records yet.

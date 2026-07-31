@@ -1,9 +1,11 @@
+import { useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { FileText, BookImage, Receipt, IdCard, ExternalLink } from "lucide-react";
+import { FileText, BookImage, Receipt, IdCard, ExternalLink, Search } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "~/components/ui/table";
+import { Input } from "~/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useData } from "~/lib/data-context";
 
-// Icon hint based on document_type string (best-effort match, no exhaustive enum in real schema)
 function DocIcon({ type }: { type: string }) {
 	const t = type.toLowerCase();
 	if (t.includes("passport")) return <BookImage className="h-3.5 w-3.5 text-muted-foreground" />;
@@ -22,17 +24,73 @@ function fileNameFrom(url: string | null): string {
 	}
 }
 
+type TypeFilter = "All" | string;
+
 export default function Documents() {
 	const { documents, loading } = useData();
+	const [query, setQuery] = useState("");
+	const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
+
+	const docTypes = useMemo(() => {
+		const seen = new Set<string>();
+		const types: string[] = [];
+		for (const d of documents) {
+			if (!seen.has(d.document_type)) {
+				seen.add(d.document_type);
+				types.push(d.document_type);
+			}
+		}
+		return types.sort();
+	}, [documents]);
+
+	const filtered = useMemo(() => {
+		const q = query.trim().toLowerCase();
+		return documents.filter((d) => {
+			const matchesType = typeFilter === "All" || d.document_type === typeFilter;
+			const travelerName = d.travelers?.name ?? "";
+			const clientName = d.booked_trips?.leads?.name ?? "";
+			const dest = d.booked_trips?.destination ?? "";
+			const matchesQuery =
+				!q ||
+				travelerName.toLowerCase().includes(q) ||
+				clientName.toLowerCase().includes(q) ||
+				dest.toLowerCase().includes(q) ||
+				d.document_type.toLowerCase().includes(q);
+			return matchesType && matchesQuery;
+		});
+	}, [documents, query, typeFilter]);
 
 	return (
 		<div className="mx-auto max-w-6xl space-y-6">
-			<div>
-				<h1 className="font-display text-2xl font-semibold">Documents</h1>
-				<p className="text-sm text-muted-foreground">
-					{loading ? "Loading…" : `${documents.length} documents on file`}
-				</p>
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<h1 className="font-display text-2xl font-semibold">Documents</h1>
+					<p className="text-sm text-muted-foreground">
+						{loading ? "Loading…" : `${filtered.length}${query || typeFilter !== "All" ? ` of ${documents.length}` : ""} documents on file`}
+					</p>
+				</div>
+				<div className="relative w-full sm:w-64">
+					<Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						placeholder="Search traveler, client, type…"
+						className="pl-8"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+					/>
+				</div>
 			</div>
+
+			{docTypes.length > 0 && (
+				<Tabs value={typeFilter} onValueChange={setTypeFilter}>
+					<TabsList className="h-auto flex-wrap justify-start">
+						<TabsTrigger value="All">All</TabsTrigger>
+						{docTypes.map((t) => (
+							<TabsTrigger key={t} value={t}>{t}</TabsTrigger>
+						))}
+					</TabsList>
+				</Tabs>
+			)}
+
 			<motion.div
 				initial={{ opacity: 0, y: 8 }}
 				animate={{ opacity: 1, y: 0 }}
@@ -58,7 +116,7 @@ export default function Documents() {
 								</TableCell>
 							</TableRow>
 						)}
-						{!loading && documents.map((d) => {
+						{!loading && filtered.map((d) => {
 							const travelerName = d.travelers?.name ?? "—";
 							const tripLabel = d.booked_trips?.leads?.name
 								? `${d.booked_trips.leads.name} · ${d.booked_trips.destination}`
@@ -93,10 +151,10 @@ export default function Documents() {
 								</TableRow>
 							);
 						})}
-						{!loading && documents.length === 0 && (
+						{!loading && filtered.length === 0 && (
 							<TableRow>
 								<TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
-									No documents on file yet.
+									{query || typeFilter !== "All" ? "No documents match your search." : "No documents on file yet."}
 								</TableCell>
 							</TableRow>
 						)}

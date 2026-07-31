@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, Phone, Mail, Globe, MessageCircle, Plus, Zap } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Phone, Mail, Globe, MessageCircle, Plus, Zap, Pencil, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Input } from "~/components/ui/input";
@@ -38,7 +38,7 @@ import { ScoreBadge } from "~/components/score-badge";
 import { Badge } from "~/components/ui/badge";
 import { Separator } from "~/components/ui/separator";
 import { useData } from "~/lib/data-context";
-import { updateLeadStatus, createLead, batchScoreLeads, computeLeadScore, scoreToUrgency } from "~/lib/db";
+import { updateLeadStatus, updateLead, deleteLead, createLead, batchScoreLeads, computeLeadScore, scoreToUrgency } from "~/lib/db";
 import type { Lead, LeadCategory, LeadStatus } from "~/lib/mock-data";
 
 type Filter = "All" | LeadCategory;
@@ -473,6 +473,11 @@ function LeadPanel({
 }) {
 	const { leads, inquiries, followUps, setLeads } = useData();
 	const [savingStatus, setSavingStatus] = useState(false);
+	const [showEdit, setShowEdit] = useState(false);
+	const [editForm, setEditForm] = useState(EMPTY_FORM);
+	const [editSaving, setEditSaving] = useState(false);
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [deleting, setDeleting] = useState(false);
 
 	const leadInquiries = useMemo(
 		() => lead ? inquiries.filter((i) => i.lead_id === lead.id) : [],
@@ -495,10 +500,92 @@ function LeadPanel({
 		}
 	}
 
+	function openEdit() {
+		if (!lead) return;
+		setEditForm({
+			name: lead.name ?? "",
+			email: lead.email ?? "",
+			phone: lead.phone ?? "",
+			destination: lead.destination ?? "",
+			trip_category: lead.trip_category ?? "",
+			timeline: lead.timeline ?? "",
+			travelers: lead.travelers ? String(lead.travelers) : "",
+			budget: (lead.budget ?? 0) > 0 ? String(lead.budget) : "",
+			vibe: lead.vibe ?? "",
+			contact_method: lead.contact_method ?? "",
+			urgency_level: lead.urgency_level ?? "",
+			lead_status: lead.lead_status,
+			source: lead.source ?? "manual",
+		});
+		setShowEdit(true);
+	}
+
+	async function handleSaveEdit() {
+		if (!lead || !editForm.name.trim()) {
+			return;
+		}
+		setEditSaving(true);
+		const score = computeLeadScore({
+			budget: editForm.budget ? Number(editForm.budget) : 0,
+			urgency_level: (editForm.urgency_level || "Low") as "High" | "Medium" | "Low",
+			travelers: editForm.travelers ? Number(editForm.travelers) : 1,
+			destination: editForm.destination,
+			phone: editForm.phone,
+			email: editForm.email,
+			vibe: editForm.vibe,
+			trip_category: editForm.trip_category,
+			contact_method: editForm.contact_method,
+		});
+		const urgency = (editForm.urgency_level || scoreToUrgency(score)) as "High" | "Medium" | "Low";
+		const fields = {
+			name: editForm.name.trim(),
+			email: editForm.email || null,
+			phone: editForm.phone || null,
+			destination: editForm.destination || null,
+			trip_category: editForm.trip_category || null,
+			timeline: editForm.timeline || null,
+			travelers: editForm.travelers ? Number(editForm.travelers) : null,
+			budget: editForm.budget ? Number(editForm.budget) : 0,
+			vibe: editForm.vibe || null,
+			contact_method: editForm.contact_method || null,
+			urgency_level: urgency,
+			lead_status: editForm.lead_status,
+			source: editForm.source || null,
+			lead_score: score,
+		};
+		try {
+			await updateLead(lead.id, fields);
+			setLeads(leads.map((l) => l.id === lead.id ? { ...l, ...fields } : l));
+			onStatusChange(lead.id, fields.lead_status);
+			setShowEdit(false);
+		} catch (e) {
+			// toast shown inside updateLead on error
+			console.error(e);
+		} finally {
+			setEditSaving(false);
+		}
+	}
+
+	async function handleDelete() {
+		if (!lead) return;
+		setDeleting(true);
+		try {
+			await deleteLead(lead.id);
+			setLeads(leads.filter((l) => l.id !== lead.id));
+			setConfirmDelete(false);
+			onClose();
+		} catch (e) {
+			console.error(e);
+		} finally {
+			setDeleting(false);
+		}
+	}
+
 	if (!lead) return null;
 
 	return (
-		<Sheet open={!!lead} onOpenChange={(open) => { if (!open) onClose(); }}>
+		<>
+		<Sheet open={!!lead} onOpenChange={(open) => { if (!open) { onClose(); setConfirmDelete(false); } }}>
 			<SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
 				<SheetHeader className="pr-8">
 					<SheetTitle className="text-lg">{lead.name || "Unnamed Lead"}</SheetTitle>
@@ -513,15 +600,15 @@ function LeadPanel({
 				</SheetHeader>
 
 				<div className="px-4 pb-6 space-y-6">
-					{/* Status */}
-					<div className="flex items-center gap-3">
-						<span className="text-sm font-medium text-muted-foreground w-20 shrink-0">Status</span>
+					{/* Status + Actions */}
+					<div className="flex items-center gap-3 flex-wrap">
+						<span className="text-sm font-medium text-muted-foreground w-14 shrink-0">Status</span>
 						<Select
 							value={lead.lead_status}
 							onValueChange={(v) => handleStatusChange(v as LeadStatus)}
 							disabled={savingStatus}
 						>
-							<SelectTrigger className="w-36 h-8 text-sm">
+							<SelectTrigger className="w-32 h-8 text-sm">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -531,6 +618,25 @@ function LeadPanel({
 								<SelectItem value="Lost">Lost</SelectItem>
 							</SelectContent>
 						</Select>
+						<div className="flex items-center gap-1 ml-auto">
+							<Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={openEdit}>
+								<Pencil className="h-3.5 w-3.5" /> Edit
+							</Button>
+							{confirmDelete ? (
+								<>
+									<Button size="sm" variant="destructive" className="h-8" disabled={deleting} onClick={handleDelete}>
+										{deleting ? "Deleting…" : "Confirm Delete"}
+									</Button>
+									<Button size="sm" variant="ghost" className="h-8" onClick={() => setConfirmDelete(false)}>
+										Cancel
+									</Button>
+								</>
+							) : (
+								<Button size="sm" variant="ghost" className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setConfirmDelete(true)}>
+									<Trash2 className="h-3.5 w-3.5" />
+								</Button>
+							)}
+						</div>
 					</div>
 
 					<Separator />
@@ -701,5 +807,111 @@ function LeadPanel({
 				</div>
 			</SheetContent>
 		</Sheet>
+
+		{/* Edit Lead Dialog */}
+		<Dialog open={showEdit} onOpenChange={(open) => { if (!open) setShowEdit(false); }}>
+			<DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+				<DialogHeader>
+					<DialogTitle>Edit Lead — {lead.name || "Unnamed"}</DialogTitle>
+				</DialogHeader>
+
+				<div className="grid grid-cols-2 gap-3 text-sm">
+					<div className="col-span-2 flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Name *</label>
+						<Input placeholder="Full name" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Email</label>
+						<Input placeholder="email@example.com" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Phone</label>
+						<Input placeholder="+91 98765 43210" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Destination</label>
+						<Input placeholder="Bali, Switzerland…" value={editForm.destination} onChange={(e) => setEditForm((f) => ({ ...f, destination: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Occasion</label>
+						<Select value={editForm.trip_category} onValueChange={(v) => setEditForm((f) => ({ ...f, trip_category: v }))}>
+							<SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="Honeymoon">Honeymoon</SelectItem>
+								<SelectItem value="Family Trip">Family Trip</SelectItem>
+								<SelectItem value="Solo">Solo</SelectItem>
+								<SelectItem value="Group">Group</SelectItem>
+								<SelectItem value="Adventure">Adventure</SelectItem>
+								<SelectItem value="Business">Business</SelectItem>
+								<SelectItem value="Anniversary">Anniversary</SelectItem>
+								<SelectItem value="Other">Other</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Travelers</label>
+						<Input type="number" placeholder="2" min={1} value={editForm.travelers} onChange={(e) => setEditForm((f) => ({ ...f, travelers: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Budget (₹)</label>
+						<Input type="number" placeholder="150000" value={editForm.budget} onChange={(e) => setEditForm((f) => ({ ...f, budget: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Timeline</label>
+						<Input placeholder="June 2026, ASAP…" value={editForm.timeline} onChange={(e) => setEditForm((f) => ({ ...f, timeline: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Vibe</label>
+						<Input placeholder="Relaxed, Adventure…" value={editForm.vibe} onChange={(e) => setEditForm((f) => ({ ...f, vibe: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Contact Method</label>
+						<Select value={editForm.contact_method} onValueChange={(v) => setEditForm((f) => ({ ...f, contact_method: v }))}>
+							<SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="WhatsApp">WhatsApp</SelectItem>
+								<SelectItem value="Phone">Phone</SelectItem>
+								<SelectItem value="Email">Email</SelectItem>
+								<SelectItem value="Instagram">Instagram</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Urgency Override</label>
+						<Select value={editForm.urgency_level} onValueChange={(v) => setEditForm((f) => ({ ...f, urgency_level: v }))}>
+							<SelectTrigger><SelectValue placeholder="Auto-compute" /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="High">High</SelectItem>
+								<SelectItem value="Medium">Medium</SelectItem>
+								<SelectItem value="Low">Low</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Status</label>
+						<Select value={editForm.lead_status} onValueChange={(v) => setEditForm((f) => ({ ...f, lead_status: v as LeadStatus }))}>
+							<SelectTrigger><SelectValue /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="New">New</SelectItem>
+								<SelectItem value="Contacted">Contacted</SelectItem>
+								<SelectItem value="Converted">Converted</SelectItem>
+								<SelectItem value="Lost">Lost</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Source</label>
+						<Input placeholder="manual, referral…" value={editForm.source} onChange={(e) => setEditForm((f) => ({ ...f, source: e.target.value }))} />
+					</div>
+				</div>
+
+				<DialogFooter showCloseButton>
+					<Button onClick={handleSaveEdit} disabled={editSaving || !editForm.name.trim()}>
+						{editSaving ? "Saving…" : "Save Changes"}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+		</>
 	);
 }

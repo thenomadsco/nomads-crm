@@ -2,14 +2,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import { ChevronRight, ExternalLink, Search } from "lucide-react";
+import { toast } from "sonner";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "~/components/ui/sheet";
 import { Separator } from "~/components/ui/separator";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "~/components/ui/select";
 import { cn } from "~/lib/utils";
 import { useData } from "~/lib/data-context";
+import { updateBooking } from "~/lib/db";
 import type { BookedTrip } from "~/lib/mock-data";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -26,7 +35,7 @@ const PAYMENT_VARIANT: Record<string, "default" | "secondary" | "destructive" | 
 };
 
 export default function Bookings() {
-	const { bookedTrips, bookingItems, payments, loading } = useData();
+	const { bookedTrips, bookingItems, payments, setBookedTrips, loading } = useData();
 	const [selected, setSelected] = useState<BookedTrip | null>(null);
 	const [query, setQuery] = useState("");
 	const [searchParams] = useSearchParams();
@@ -151,7 +160,17 @@ export default function Bookings() {
 
 			<Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
 				<SheetContent className="w-full sm:max-w-md">
-					{selected && <BookingDetail booking={selected} bookingItems={bookingItems} payments={payments} />}
+					{selected && (
+						<BookingDetail
+							booking={selected}
+							bookingItems={bookingItems}
+							payments={payments}
+							onTripStatusChange={(id, tripStatus) => {
+								setBookedTrips(bookedTrips.map((b) => b.id === id ? { ...b, trip_status: tripStatus } : b));
+								setSelected((prev) => prev ? { ...prev, trip_status: tripStatus } : prev);
+							}}
+						/>
+					)}
 				</SheetContent>
 			</Sheet>
 		</div>
@@ -162,11 +181,27 @@ function BookingDetail({
 	booking,
 	bookingItems,
 	payments,
+	onTripStatusChange,
 }: {
 	booking: BookedTrip;
 	bookingItems: import("~/lib/mock-data").BookingItem[];
 	payments: import("~/lib/mock-data").Payment[];
+	onTripStatusChange: (id: string, tripStatus: string) => void;
 }) {
+	const [savingStatus, setSavingStatus] = useState(false);
+
+	async function handleTripStatusChange(tripStatus: string) {
+		setSavingStatus(true);
+		try {
+			await updateBooking(booking.id, { trip_status: tripStatus });
+			onTripStatusChange(booking.id, tripStatus);
+			toast.success(`Trip status updated to ${tripStatus}`);
+		} catch (e) {
+			toast.error("Failed to update trip status", { description: String(e) });
+		} finally {
+			setSavingStatus(false);
+		}
+	}
 	const items = bookingItems.filter((i) => i.booked_trip_id === booking.id);
 	const tripPayments = payments.filter((p) => p.booked_trip_id === booking.id);
 
@@ -197,9 +232,23 @@ function BookingDetail({
 						<span className="text-muted-foreground">Trip Name</span>
 						<span className="max-w-[200px] text-right font-medium">{booking.trip_name}</span>
 					</div>
-					<div className="flex justify-between py-1">
+					<div className="flex items-center justify-between py-1">
 						<span className="text-muted-foreground">Trip Status</span>
-						<Badge variant={STATUS_VARIANT[booking.trip_status] ?? "outline"}>{booking.trip_status}</Badge>
+						<Select value={booking.trip_status} disabled={savingStatus} onValueChange={handleTripStatusChange}>
+							<SelectTrigger className="h-7 w-32 text-xs">
+								<SelectValue>
+									<Badge variant={STATUS_VARIANT[booking.trip_status] ?? "outline"} className="pointer-events-none">
+										{booking.trip_status}
+									</Badge>
+								</SelectValue>
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="Planning">Planning</SelectItem>
+								<SelectItem value="Confirmed">Confirmed</SelectItem>
+								<SelectItem value="Completed">Completed</SelectItem>
+								<SelectItem value="Cancelled">Cancelled</SelectItem>
+							</SelectContent>
+						</Select>
 					</div>
 					<div className="flex justify-between py-1">
 						<span className="text-muted-foreground">Payment Status</span>

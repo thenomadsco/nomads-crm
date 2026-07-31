@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
+import { Input } from "~/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "~/components/ui/sheet";
 import { Separator } from "~/components/ui/separator";
 import { useData } from "~/lib/data-context";
@@ -11,14 +12,37 @@ import type { Traveler } from "~/lib/mock-data";
 export default function Travelers() {
 	const { travelers, visaApplications, documents, loading } = useData();
 	const [selected, setSelected] = useState<Traveler | null>(null);
+	const [query, setQuery] = useState("");
+
+	const filtered = useMemo(() => {
+		const q = query.trim().toLowerCase();
+		if (!q) return travelers;
+		return travelers.filter((t) =>
+			(t.name?.toLowerCase().includes(q) ?? false) ||
+			(t.leads?.name?.toLowerCase().includes(q) ?? false) ||
+			(t.passport_number?.toLowerCase().includes(q) ?? false) ||
+			(t.nationality?.toLowerCase().includes(q) ?? false),
+		);
+	}, [travelers, query]);
 
 	return (
 		<div className="mx-auto max-w-6xl space-y-6">
-			<div>
-				<h1 className="font-display text-2xl font-semibold">Travelers</h1>
-				<p className="text-sm text-muted-foreground">
-					{loading ? "Loading…" : `${travelers.length} travelers on file`}
-				</p>
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+				<div>
+					<h1 className="font-display text-2xl font-semibold">Travelers</h1>
+					<p className="text-sm text-muted-foreground">
+						{loading ? "Loading…" : `${filtered.length}${query ? ` of ${travelers.length}` : ""} travelers on file`}
+					</p>
+				</div>
+				<div className="relative w-full sm:w-64">
+					<Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						placeholder="Search name, passport, nationality…"
+						className="pl-8"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+					/>
+				</div>
 			</div>
 			<motion.div
 				initial={{ opacity: 0, y: 8 }}
@@ -45,7 +69,7 @@ export default function Travelers() {
 								</TableCell>
 							</TableRow>
 						)}
-						{!loading && travelers.map((t) => (
+						{!loading && filtered.map((t) => (
 							<TableRow key={t.id} className="cursor-pointer" onClick={() => setSelected(t)}>
 								<TableCell className="font-medium">{t.name}</TableCell>
 								<TableCell>{t.leads?.name ?? <span className="text-muted-foreground">—</span>}</TableCell>
@@ -57,10 +81,10 @@ export default function Travelers() {
 								</TableCell>
 							</TableRow>
 						))}
-						{!loading && travelers.length === 0 && (
+						{!loading && filtered.length === 0 && (
 							<TableRow>
 								<TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
-									No travelers on file yet.
+									{query ? "No travelers match your search." : "No travelers on file yet."}
 								</TableCell>
 							</TableRow>
 						)}

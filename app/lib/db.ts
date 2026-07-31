@@ -342,3 +342,83 @@ export async function deleteLead(id: string): Promise<void> {
 		.eq("id", id);
 	if (error) throw new Error(`deleteLead: ${error.message}`);
 }
+
+// ── Update lead fields ────────────────────────────────────────────────────────
+
+export type UpdateLeadInput = Partial<Pick<Lead,
+	"name" | "email" | "phone" | "destination" | "trip_category" | "timeline" |
+	"travelers" | "budget" | "vibe" | "contact_method" | "urgency_level" | "lead_status" | "source"
+>> & { lead_score?: number };
+
+export async function updateLead(id: string, fields: UpdateLeadInput): Promise<void> {
+	const { error } = await supabase.from("leads").update(fields).eq("id", id);
+	if (error) throw new Error(`updateLead: ${error.message}`);
+}
+
+// ── Update task ───────────────────────────────────────────────────────────────
+
+export async function updateTask(id: string, fields: {
+	task_type?: string;
+	priority?: "High" | "Medium" | "Low";
+	due_date?: string;
+	notes?: string | null;
+}): Promise<Task> {
+	const { data, error } = await supabase
+		.from("tasks")
+		.update(fields)
+		.eq("id", id)
+		.select("*, leads(name, destination)")
+		.single();
+	if (error) throw new Error(`updateTask: ${error.message}`);
+	return data as Task;
+}
+
+// ── Delete task ───────────────────────────────────────────────────────────────
+
+export async function deleteTask(id: string): Promise<void> {
+	const { error } = await supabase.from("tasks").delete().eq("id", id);
+	if (error) throw new Error(`deleteTask: ${error.message}`);
+}
+
+// ── Update booking ────────────────────────────────────────────────────────────
+
+export async function updateBooking(id: string, fields: { trip_status?: string; payment_status?: string }): Promise<void> {
+	const { error } = await supabase.from("booked_trips").update(fields).eq("id", id);
+	if (error) throw new Error(`updateBooking: ${error.message}`);
+}
+
+// ── Create quote ──────────────────────────────────────────────────────────────
+
+export type NewQuoteInput = {
+	lead_id: string;
+	amount: number;
+	sent_date?: string;
+	status?: Quote["status"];
+};
+
+export async function createQuote(input: NewQuoteInput): Promise<Quote> {
+	const { data, error } = await supabase
+		.from("quotes")
+		.insert({
+			lead_id: input.lead_id,
+			amount: input.amount,
+			sent_date: input.sent_date || null,
+			status: input.status ?? "Draft",
+		})
+		.select("*, leads(name, destination)")
+		.single();
+	if (error) throw new Error(`createQuote: ${error.message}`);
+	return data as Quote;
+}
+
+// ── Update visa ───────────────────────────────────────────────────────────────
+
+export async function updateVisa(id: string, fields: {
+	status?: VisaApplication["status"];
+	appointment_date?: string | null;
+	expiry_date?: string | null;
+	submission_date?: string | null;
+}): Promise<void> {
+	const { error } = await supabase.from("visa_applications").update(fields).eq("id", id);
+	if (error) throw new Error(`updateVisa: ${error.message}`);
+}
