@@ -128,54 +128,69 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
 	// Supabase Realtime — listen for new leads inserted from the website
 	useEffect(() => {
-		const channel = supabase
-			.channel("crm-leads-realtime")
-			.on(
-				"postgres_changes",
-				{ event: "INSERT", schema: "public", table: "leads" },
-				(payload) => {
-					const newLead = payload.new as Lead;
-					if (newLead.is_test || newLead.deleted_at) return;
-					const score = newLead.lead_score ?? computeLeadScore(newLead);
-					const enriched: Lead = { ...newLead, lead_score: score };
-					setLeads((prev) => {
-						// avoid duplicates if refetch already captured it
-						if (prev.some((l) => l.id === enriched.id)) return prev;
-						return [enriched, ...prev];
+		let active = true;
+		let retryTimer: ReturnType<typeof setTimeout> | null = null;
+		let currentChannel: ReturnType<typeof supabase.channel> | null = null;
+
+		function handlePayload(payload: { new: unknown }) {
+			const newLead = payload.new as Lead;
+			if (newLead.is_test || newLead.deleted_at) return;
+			const score = newLead.lead_score ?? computeLeadScore(newLead);
+			const enriched: Lead = { ...newLead, lead_score: score };
+			setLeads((prev) => {
+				if (prev.some((l) => l.id === enriched.id)) return prev;
+				return [enriched, ...prev];
+			});
+			const dest = [newLead.destination, newLead.trip_category].filter(Boolean).join(" · ");
+			const isHot = score >= 75;
+			const notifTitle = isHot
+				? `Hot lead: ${newLead.name || "New lead"}`
+				: `New lead: ${newLead.name || "Unknown"}`;
+			const notifBody = `Scored ${score}${dest ? ` · ${dest}` : ""}`;
+
+			pushEventRef.current(isHot ? "hot_lead" : "new_lead", notifTitle, notifBody);
+
+			if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+				if ("serviceWorker" in navigator) {
+					navigator.serviceWorker.ready.then((reg) => {
+						reg.showNotification(notifTitle, {
+							body: notifBody,
+							icon: "/icons/icon-192.png",
+							badge: "/icons/icon-192.png",
+							tag: "new-lead",
+							renotify: true,
+						});
+					}).catch(() => {
+						new Notification(notifTitle, { body: notifBody, icon: "/icons/icon-192.png" });
 					});
-					const dest = [newLead.destination, newLead.trip_category].filter(Boolean).join(" · ");
-					const isHot = score >= 75;
-					const notifTitle = isHot
-						? `Hot lead: ${newLead.name || "New lead"}`
-						: `New lead: ${newLead.name || "Unknown"}`;
-					const notifBody = `Scored ${score}${dest ? ` · ${dest}` : ""}`;
+				} else {
+					new Notification(notifTitle, { body: notifBody, icon: "/icons/icon-192.png" });
+				}
+			}
+		}
 
-					pushEventRef.current(isHot ? "hot_lead" : "new_lead", notifTitle, notifBody);
-
-					// Native OS notification (works when app is backgrounded)
-					if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-						if ("serviceWorker" in navigator) {
-							navigator.serviceWorker.ready.then((reg) => {
-								reg.showNotification(notifTitle, {
-									body: notifBody,
-									icon: "/icons/icon-192.png",
-									badge: "/icons/icon-192.png",
-									tag: "new-lead",
-									renotify: true,
-								});
-							}).catch(() => {
-								new Notification(notifTitle, { body: notifBody, icon: "/icons/icon-192.png" });
-							});
-						} else {
-							new Notification(notifTitle, { body: notifBody, icon: "/icons/icon-192.png" });
-						}
+		function subscribe() {
+			if (!active) return;
+			currentChannel = supabase
+				.channel(`crm-leads-realtime-${Date.now()}`)
+				.on("postgres_changes", { event: "INSERT", schema: "public", table: "leads" }, handlePayload)
+				.subscribe((status) => {
+					if (!active) return;
+					if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+						if (currentChannel) supabase.removeChannel(currentChannel);
+						retryTimer = setTimeout(subscribe, 5000);
 					}
-				},
-			)
-			.subscribe();
+				});
+		}
 
-		return () => { supabase.removeChannel(channel); };
-	}, []); // intentionally empty — channel is stable for app lifetime
+		subscribe();
+
+		return () => {
+			active = false;
+			if (retryTimer) clearTimeout(retryTimer);
+			if (currentChannel) supabase.removeChannel(currentChannel);
+		};
+	}, []);
 
 	return (
 		<DataContext.Provider
