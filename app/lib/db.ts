@@ -422,3 +422,61 @@ export async function updateVisa(id: string, fields: {
 	const { error } = await supabase.from("visa_applications").update(fields).eq("id", id);
 	if (error) throw new Error(`updateVisa: ${error.message}`);
 }
+
+// ── Create payment ────────────────────────────────────────────────────────────
+
+export type NewPaymentInput = {
+	booked_trip_id: string;
+	amount: number;
+	method?: string;
+	payment_date?: string | null;
+};
+
+export async function createPayment(input: NewPaymentInput): Promise<Payment> {
+	const { data, error } = await supabase
+		.from("payments")
+		.insert({
+			booked_trip_id: input.booked_trip_id,
+			amount: input.amount,
+			method: input.method || null,
+			payment_date: input.payment_date || null,
+		})
+		.select("*, booked_trips(destination, lead_id, leads(name))")
+		.single();
+	if (error) throw new Error(`createPayment: ${error.message}`);
+	return data as Payment;
+}
+
+// ── Create booking ────────────────────────────────────────────────────────────
+
+export type NewBookingInput = {
+	lead_id: string;
+	trip_name: string;
+	destination: string;
+	travel_start?: string;
+	travel_end?: string;
+	total_invoice_value?: number;
+};
+
+export async function createBooking(input: NewBookingInput): Promise<BookedTrip> {
+	const invoiceValue = input.total_invoice_value ?? 0;
+	const { data, error } = await supabase
+		.from("booked_trips")
+		.insert({
+			lead_id: input.lead_id,
+			trip_name: input.trip_name,
+			destination: input.destination,
+			travel_start: input.travel_start || null,
+			travel_end: input.travel_end || null,
+			total_invoice_value: invoiceValue,
+			amount_paid: 0,
+			balance_due: invoiceValue,
+			payment_status: "Unpaid",
+			trip_status: "Planning",
+			booking_date: new Date().toISOString().slice(0, 10),
+		})
+		.select("*, leads(name)")
+		.single();
+	if (error) throw new Error(`createBooking: ${error.message}`);
+	return data as BookedTrip;
+}

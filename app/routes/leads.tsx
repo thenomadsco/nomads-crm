@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, Phone, Mail, Globe, MessageCircle, Plus, Zap, Pencil, Trash2 } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Phone, Mail, Globe, MessageCircle, Plus, Zap, Pencil, Trash2, Download } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Input } from "~/components/ui/input";
@@ -38,8 +38,8 @@ import { ScoreBadge } from "~/components/score-badge";
 import { Badge } from "~/components/ui/badge";
 import { Separator } from "~/components/ui/separator";
 import { useData } from "~/lib/data-context";
-import { updateLeadStatus, updateLead, deleteLead, createLead, batchScoreLeads, computeLeadScore, scoreToUrgency } from "~/lib/db";
-import type { Lead, LeadCategory, LeadStatus } from "~/lib/mock-data";
+import { updateLeadStatus, updateLead, deleteLead, createLead, batchScoreLeads, computeLeadScore, scoreToUrgency, createTask, createBooking } from "~/lib/db";
+import type { Lead, LeadCategory, LeadStatus, Task, BookedTrip } from "~/lib/mock-data";
 
 type Filter = "All" | LeadCategory;
 
@@ -133,6 +133,33 @@ export default function Leads() {
 		setForm((prev) => ({ ...prev, [key]: value }));
 	}
 
+	function handleExportCSV() {
+		const headers = ["Name", "Email", "Phone", "Destination", "Occasion", "Travelers", "Budget (₹)", "Urgency", "Score", "Status", "Source", "Created"];
+		const rows = filtered.map((l) => [
+			l.name ?? "",
+			l.email ?? "",
+			l.phone ?? "",
+			l.destination ?? "",
+			l.trip_category ?? "",
+			l.travelers ?? "",
+			l.budget ?? "",
+			l.urgency_level ?? "",
+			l.lead_score ?? "",
+			l.lead_status,
+			l.source ?? "",
+			new Date(l.created_at).toLocaleDateString("en-IN"),
+		]);
+		const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+		const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
+		a.click();
+		URL.revokeObjectURL(url);
+		toast.success(`Exported ${filtered.length} leads`);
+	}
+
 	async function handleScoreAll() {
 		setScoring(true);
 		try {
@@ -208,6 +235,10 @@ export default function Leads() {
 					>
 						<Zap className="h-4 w-4 mr-1" />
 						{scoring ? "Scoring…" : "Score Unscored"}
+					</Button>
+					<Button size="sm" variant="outline" onClick={handleExportCSV} disabled={filtered.length === 0}>
+						<Download className="h-4 w-4 mr-1" />
+						Export CSV
 					</Button>
 					<Button size="sm" onClick={() => setShowNewLead(true)}>
 						<Plus className="h-4 w-4 mr-1" />
@@ -471,13 +502,21 @@ function LeadPanel({
 	onClose: () => void;
 	onStatusChange: (id: string, status: LeadStatus) => void;
 }) {
-	const { leads, inquiries, followUps, setLeads } = useData();
+	const { leads, tasks, bookedTrips, inquiries, followUps, setLeads, setTasks, setBookedTrips } = useData();
 	const [savingStatus, setSavingStatus] = useState(false);
 	const [showEdit, setShowEdit] = useState(false);
 	const [editForm, setEditForm] = useState(EMPTY_FORM);
 	const [editSaving, setEditSaving] = useState(false);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [deleting, setDeleting] = useState(false);
+	// Add Task
+	const [showAddTask, setShowAddTask] = useState(false);
+	const [taskForm, setTaskForm] = useState({ task_type: "Follow Up", priority: "Medium" as "High" | "Medium" | "Low", due_date: new Date().toISOString().slice(0, 10), notes: "" });
+	const [savingTask, setSavingTask] = useState(false);
+	// Convert to Booking
+	const [showConvert, setShowConvert] = useState(false);
+	const [convertForm, setConvertForm] = useState({ trip_name: "", destination: "", travel_start: "", travel_end: "", total_invoice_value: "" });
+	const [savingConvert, setSavingConvert] = useState(false);
 
 	const leadInquiries = useMemo(
 		() => lead ? inquiries.filter((i) => i.lead_id === lead.id) : [],
@@ -581,6 +620,75 @@ function LeadPanel({
 		}
 	}
 
+	async function handleAddTask() {
+		if (!lead) return;
+		if (!taskForm.task_type || !taskForm.due_date) {
+			toast.error("Task type and due date are required");
+			return;
+		}
+		setSavingTask(true);
+		try {
+			const task = await createTask({
+				lead_id: lead.id,
+				task_type: taskForm.task_type,
+				priority: taskForm.priority,
+				due_date: taskForm.due_date,
+				notes: taskForm.notes || undefined,
+			});
+			setTasks([...tasks, task]);
+			toast.success(`Task created: ${task.task_type}`);
+			setShowAddTask(false);
+			setTaskForm({ task_type: "Follow Up", priority: "Medium", due_date: new Date().toISOString().slice(0, 10), notes: "" });
+		} catch (e) {
+			toast.error("Failed to create task", { description: String(e) });
+		} finally {
+			setSavingTask(false);
+		}
+	}
+
+	async function handleConvert() {
+		if (!lead) return;
+		if (!convertForm.trip_name.trim()) {
+			toast.error("Trip name is required");
+			return;
+		}
+		setSavingConvert(true);
+		try {
+			const booking = await createBooking({
+				lead_id: lead.id,
+				trip_name: convertForm.trip_name.trim(),
+				destination: convertForm.destination || lead.destination || "",
+				travel_start: convertForm.travel_start || undefined,
+				travel_end: convertForm.travel_end || undefined,
+				total_invoice_value: convertForm.total_invoice_value ? Number(convertForm.total_invoice_value) : undefined,
+			});
+			setBookedTrips([...bookedTrips, booking]);
+			// Mark lead as Converted
+			await updateLeadStatus(lead.id, "Converted");
+			setLeads(leads.map((l) => l.id === lead.id ? { ...l, lead_status: "Converted" } : l));
+			onStatusChange(lead.id, "Converted");
+			toast.success(`${lead.name} converted to booking!`, { description: booking.trip_name });
+			setShowConvert(false);
+			setConvertForm({ trip_name: "", destination: "", travel_start: "", travel_end: "", total_invoice_value: "" });
+		} catch (e) {
+			toast.error("Failed to create booking", { description: String(e) });
+		} finally {
+			setSavingConvert(false);
+		}
+	}
+
+	function openConvert() {
+		if (!lead) return;
+		setConvertForm({
+			trip_name: lead.destination ? `${lead.trip_category ?? "Trip"} to ${lead.destination}` : "",
+			destination: lead.destination ?? "",
+			travel_start: "",
+			travel_end: "",
+			total_invoice_value: lead.budget ? String(lead.budget) : "",
+		});
+		setShowConvert(true);
+	}
+
 	if (!lead) return null;
 
 	return (
@@ -637,6 +745,15 @@ function LeadPanel({
 								</Button>
 							)}
 						</div>
+					</div>
+
+					<div className="flex gap-2">
+						<Button size="sm" variant="outline" className="h-8 gap-1.5 flex-1" onClick={() => setShowAddTask(true)}>
+							<Plus className="h-3.5 w-3.5" /> Add Task
+						</Button>
+						<Button size="sm" className="h-8 gap-1.5 flex-1" onClick={openConvert} disabled={lead.lead_status === "Converted"}>
+							{lead.lead_status === "Converted" ? "Already Converted" : "Convert to Booking"}
+						</Button>
 					</div>
 
 					<Separator />
@@ -908,6 +1025,100 @@ function LeadPanel({
 				<DialogFooter showCloseButton>
 					<Button onClick={handleSaveEdit} disabled={editSaving || !editForm.name.trim()}>
 						{editSaving ? "Saving…" : "Save Changes"}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+
+		{/* Add Task Dialog */}
+		<Dialog open={showAddTask} onOpenChange={(open) => { if (!open) setShowAddTask(false); }}>
+			<DialogContent className="sm:max-w-sm">
+				<DialogHeader>
+					<DialogTitle>Add Task — {lead.name || "Lead"}</DialogTitle>
+				</DialogHeader>
+				<div className="space-y-3 text-sm">
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Task Type *</label>
+						<Select value={taskForm.task_type} onValueChange={(v) => setTaskForm((f) => ({ ...f, task_type: v }))}>
+							<SelectTrigger><SelectValue /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="Follow Up">Follow Up</SelectItem>
+								<SelectItem value="Send Itinerary">Send Itinerary</SelectItem>
+								<SelectItem value="Call">Call</SelectItem>
+								<SelectItem value="WhatsApp">WhatsApp</SelectItem>
+								<SelectItem value="Email">Email</SelectItem>
+								<SelectItem value="Send Quote">Send Quote</SelectItem>
+								<SelectItem value="Book Flights">Book Flights</SelectItem>
+								<SelectItem value="Book Hotels">Book Hotels</SelectItem>
+								<SelectItem value="Visa Application">Visa Application</SelectItem>
+								<SelectItem value="Payment Follow Up">Payment Follow Up</SelectItem>
+								<SelectItem value="Other">Other</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="grid grid-cols-2 gap-2">
+						<div className="flex flex-col gap-1">
+							<label className="text-xs font-medium text-muted-foreground">Priority</label>
+							<Select value={taskForm.priority} onValueChange={(v) => setTaskForm((f) => ({ ...f, priority: v as "High" | "Medium" | "Low" }))}>
+								<SelectTrigger><SelectValue /></SelectTrigger>
+								<SelectContent>
+									<SelectItem value="High">High</SelectItem>
+									<SelectItem value="Medium">Medium</SelectItem>
+									<SelectItem value="Low">Low</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="flex flex-col gap-1">
+							<label className="text-xs font-medium text-muted-foreground">Due Date *</label>
+							<Input type="date" className="h-9 text-xs" value={taskForm.due_date} onChange={(e) => setTaskForm((f) => ({ ...f, due_date: e.target.value }))} />
+						</div>
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Notes</label>
+						<Input placeholder="Optional notes…" value={taskForm.notes} onChange={(e) => setTaskForm((f) => ({ ...f, notes: e.target.value }))} />
+					</div>
+				</div>
+				<DialogFooter showCloseButton>
+					<Button onClick={handleAddTask} disabled={savingTask || !taskForm.task_type || !taskForm.due_date}>
+						{savingTask ? "Saving…" : "Add Task"}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+
+		{/* Convert to Booking Dialog */}
+		<Dialog open={showConvert} onOpenChange={(open) => { if (!open) setShowConvert(false); }}>
+			<DialogContent className="sm:max-w-sm">
+				<DialogHeader>
+					<DialogTitle>Convert to Booking — {lead.name || "Lead"}</DialogTitle>
+				</DialogHeader>
+				<div className="space-y-3 text-sm">
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Trip Name *</label>
+						<Input placeholder="Bali Honeymoon Package" value={convertForm.trip_name} onChange={(e) => setConvertForm((f) => ({ ...f, trip_name: e.target.value }))} />
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Destination</label>
+						<Input placeholder="Bali" value={convertForm.destination} onChange={(e) => setConvertForm((f) => ({ ...f, destination: e.target.value }))} />
+					</div>
+					<div className="grid grid-cols-2 gap-2">
+						<div className="flex flex-col gap-1">
+							<label className="text-xs font-medium text-muted-foreground">Travel Start</label>
+							<Input type="date" className="h-9 text-xs" value={convertForm.travel_start} onChange={(e) => setConvertForm((f) => ({ ...f, travel_start: e.target.value }))} />
+						</div>
+						<div className="flex flex-col gap-1">
+							<label className="text-xs font-medium text-muted-foreground">Travel End</label>
+							<Input type="date" className="h-9 text-xs" value={convertForm.travel_end} onChange={(e) => setConvertForm((f) => ({ ...f, travel_end: e.target.value }))} />
+						</div>
+					</div>
+					<div className="flex flex-col gap-1">
+						<label className="text-xs font-medium text-muted-foreground">Invoice Value (₹)</label>
+						<Input type="number" placeholder="200000" value={convertForm.total_invoice_value} onChange={(e) => setConvertForm((f) => ({ ...f, total_invoice_value: e.target.value }))} />
+					</div>
+				</div>
+				<DialogFooter showCloseButton>
+					<Button onClick={handleConvert} disabled={savingConvert || !convertForm.trip_name.trim()}>
+						{savingConvert ? "Creating…" : "Create Booking"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

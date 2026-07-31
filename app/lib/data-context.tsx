@@ -53,6 +53,7 @@ type DataState = {
 	setLeads: (leads: Lead[]) => void;
 	setTasks: (tasks: Task[]) => void;
 	setBookedTrips: (trips: BookedTrip[]) => void;
+	setPayments: (payments: Payment[]) => void;
 	setVisaApplications: (visas: VisaApplication[]) => void;
 	setQuotes: (quotes: Quote[]) => void;
 	refetch: () => Promise<void>;
@@ -178,6 +179,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 				setLeads,
 				setTasks,
 				setBookedTrips,
+				setPayments,
 				setVisaApplications,
 				setQuotes,
 				refetch: load,

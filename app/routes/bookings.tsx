@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { motion } from "motion/react";
-import { ChevronRight, ExternalLink, Search } from "lucide-react";
+import { ChevronRight, ExternalLink, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
@@ -18,8 +18,8 @@ import {
 } from "~/components/ui/select";
 import { cn } from "~/lib/utils";
 import { useData } from "~/lib/data-context";
-import { updateBooking } from "~/lib/db";
-import type { BookedTrip } from "~/lib/mock-data";
+import { updateBooking, createPayment } from "~/lib/db";
+import type { BookedTrip, Payment } from "~/lib/mock-data";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
 	Confirmed: "default",
@@ -34,15 +34,16 @@ const PAYMENT_VARIANT: Record<string, "default" | "secondary" | "destructive" | 
 	Unpaid: "destructive",
 };
 
+const PAYMENT_METHODS = ["UPI", "Bank Transfer", "Cash", "Cheque", "Online", "Credit Card"];
+
 export default function Bookings() {
-	const { bookedTrips, bookingItems, payments, setBookedTrips, loading } = useData();
+	const { bookedTrips, bookingItems, payments, setBookedTrips, setPayments, loading } = useData();
 	const [selected, setSelected] = useState<BookedTrip | null>(null);
 	const [query, setQuery] = useState("");
 	const [searchParams] = useSearchParams();
 	const highlight = searchParams.get("highlight");
 	const highlightRef = useRef<HTMLTableRowElement | null>(null);
 
-	// Auto-open the sheet for the highlighted booking
 	useEffect(() => {
 		if (!highlight || loading) return;
 		const trip = bookedTrips.find((b) => b.id === highlight);
@@ -63,6 +64,26 @@ export default function Bookings() {
 			(b.invoice_number?.toLowerCase().includes(q) ?? false),
 		);
 	}, [bookedTrips, query]);
+
+	function handlePaymentAdded(payment: Payment) {
+		setPayments([...payments, payment]);
+		// Update amount_paid and balance_due on the booking optimistically
+		setBookedTrips(bookedTrips.map((b) => {
+			if (b.id !== payment.booked_trip_id) return b;
+			const newAmountPaid = (b.amount_paid ?? 0) + payment.amount;
+			const newBalanceDue = Math.max(0, (b.total_invoice_value ?? 0) - newAmountPaid);
+			const newPaymentStatus = newBalanceDue === 0 ? "Paid" : newAmountPaid > 0 ? "Partial" : "Unpaid";
+			return { ...b, amount_paid: newAmountPaid, balance_due: newBalanceDue, payment_status: newPaymentStatus };
+		}));
+		// Keep the selected booking in sync
+		setSelected((prev) => {
+			if (!prev || prev.id !== payment.booked_trip_id) return prev;
+			const newAmountPaid = (prev.amount_paid ?? 0) + payment.amount;
+			const newBalanceDue = Math.max(0, (prev.total_invoice_value ?? 0) - newAmountPaid);
+			const newPaymentStatus = newBalanceDue === 0 ? "Paid" : newAmountPaid > 0 ? "Partial" : "Unpaid";
+			return { ...prev, amount_paid: newAmountPaid, balance_due: newBalanceDue, payment_status: newPaymentStatus };
+		});
+	}
 
 	return (
 		<div className="mx-auto max-w-6xl space-y-6">
@@ -164,11 +185,12 @@ export default function Bookings() {
 						<BookingDetail
 							booking={selected}
 							bookingItems={bookingItems}
-							payments={payments}
+							payments={payments.filter((p) => p.booked_trip_id === selected.id)}
 							onTripStatusChange={(id, tripStatus) => {
 								setBookedTrips(bookedTrips.map((b) => b.id === id ? { ...b, trip_status: tripStatus } : b));
 								setSelected((prev) => prev ? { ...prev, trip_status: tripStatus } : prev);
 							}}
+							onPaymentAdded={handlePaymentAdded}
 						/>
 					)}
 				</SheetContent>
@@ -182,13 +204,25 @@ function BookingDetail({
 	bookingItems,
 	payments,
 	onTripStatusChange,
+	onPaymentAdded,
 }: {
 	booking: BookedTrip;
 	bookingItems: import("~/lib/mock-data").BookingItem[];
-	payments: import("~/lib/mock-data").Payment[];
+	payments: Payment[];
 	onTripStatusChange: (id: string, tripStatus: string) => void;
+	onPaymentAdded: (payment: Payment) => void;
 }) {
 	const [savingStatus, setSavingStatus] = useState(false);
+	const [showAddPayment, setShowAddPayment] = useState(false);
+	const [paymentForm, setPaymentForm] = useState({
+		amount: "",
+		method: "",
+		payment_date: new Date().toISOString().slice(0, 10),
+		isPending: false,
+	});
+	const [savingPayment, setSavingPayment] = useState(false);
+
+	const items = bookingItems.filter((i) => i.booked_trip_id === booking.id);
 
 	async function handleTripStatusChange(tripStatus: string) {
 		setSavingStatus(true);
@@ -202,8 +236,30 @@ function BookingDetail({
 			setSavingStatus(false);
 		}
 	}
-	const items = bookingItems.filter((i) => i.booked_trip_id === booking.id);
-	const tripPayments = payments.filter((p) => p.booked_trip_id === booking.id);
+
+	async function handleAddPayment() {
+		if (!paymentForm.amount || Number(paymentForm.amount) <= 0) {
+			toast.error("Enter a valid amount");
+			return;
+		}
+		setSavingPayment(true);
+		try {
+			const payment = await createPayment({
+				booked_trip_id: booking.id,
+				amount: Number(paymentForm.amount),
+				method: paymentForm.method || undefined,
+				payment_date: paymentForm.isPending ? null : paymentForm.payment_date,
+			});
+			onPaymentAdded(payment);
+			toast.success(`₹${Number(paymentForm.amount).toLocaleString("en-IN")} payment recorded`);
+			setShowAddPayment(false);
+			setPaymentForm({ amount: "", method: "", payment_date: new Date().toISOString().slice(0, 10), isPending: false });
+		} catch (e) {
+			toast.error("Failed to record payment", { description: String(e) });
+		} finally {
+			setSavingPayment(false);
+		}
+	}
 
 	return (
 		<div className="flex h-full flex-col">
@@ -287,34 +343,92 @@ function BookingDetail({
 					</>
 				)}
 
-				{tripPayments.length > 0 && (
-					<>
-						<div>
-							<h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-								Payments
-							</h3>
-							<div className="space-y-2">
-								{tripPayments.map((p) => (
-									<div key={p.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
-										<div>
-											<p className="font-medium">{p.method ?? "Payment"}</p>
-											<p className="text-xs text-muted-foreground">
-												{p.payment_date ?? "Awaiting payment"}
-											</p>
-										</div>
-										<div className="flex items-center gap-2">
-											<span className="font-medium">₹{p.amount.toLocaleString("en-IN")}</span>
-											<Badge variant={p.payment_date ? "default" : "secondary"}>
-												{p.payment_date ? "Paid" : "Pending"}
-											</Badge>
-										</div>
-									</div>
-								))}
+				{/* Payments section */}
+				<div>
+					<div className="mb-2 flex items-center justify-between">
+						<h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payments</h3>
+						<Button size="sm" variant="outline" className="h-6 px-2 text-xs gap-1" onClick={() => setShowAddPayment((v) => !v)}>
+							<Plus className="h-3 w-3" /> Add
+						</Button>
+					</div>
+
+					{showAddPayment && (
+						<div className="mb-3 space-y-2 rounded-md border p-3 text-sm bg-muted/30">
+							<div className="grid grid-cols-2 gap-2">
+								<div className="flex flex-col gap-1">
+									<label className="text-xs text-muted-foreground">Amount (₹) *</label>
+									<Input
+										type="number"
+										placeholder="50000"
+										className="h-8 text-xs"
+										value={paymentForm.amount}
+										onChange={(e) => setPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+									/>
+								</div>
+								<div className="flex flex-col gap-1">
+									<label className="text-xs text-muted-foreground">Method</label>
+									<Select value={paymentForm.method} onValueChange={(v) => setPaymentForm((f) => ({ ...f, method: v }))}>
+										<SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select…" /></SelectTrigger>
+										<SelectContent>
+											{PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+										</SelectContent>
+									</Select>
+								</div>
+							</div>
+							<div className="flex flex-col gap-1">
+								<label className="text-xs text-muted-foreground">Payment Date</label>
+								<Input
+									type="date"
+									className="h-8 text-xs"
+									value={paymentForm.payment_date}
+									disabled={paymentForm.isPending}
+									onChange={(e) => setPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
+								/>
+							</div>
+							<label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+								<input
+									type="checkbox"
+									checked={paymentForm.isPending}
+									onChange={(e) => setPaymentForm((f) => ({ ...f, isPending: e.target.checked }))}
+									className="rounded"
+								/>
+								Mark as pending (no date yet)
+							</label>
+							<div className="flex gap-2 pt-1">
+								<Button size="sm" className="h-7 text-xs flex-1" disabled={savingPayment || !paymentForm.amount} onClick={handleAddPayment}>
+									{savingPayment ? "Saving…" : "Record Payment"}
+								</Button>
+								<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowAddPayment(false)}>
+									Cancel
+								</Button>
 							</div>
 						</div>
-						<Separator />
-					</>
-				)}
+					)}
+
+					<div className="space-y-2">
+						{payments.length === 0 && !showAddPayment && (
+							<p className="text-sm text-muted-foreground">No payments recorded yet.</p>
+						)}
+						{payments.map((p) => (
+							<div key={p.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
+								<div>
+									<p className="font-medium">{p.method ?? "Payment"}</p>
+									<p className="text-xs text-muted-foreground">
+										{p.payment_date ?? "Awaiting payment"}
+									</p>
+								</div>
+								<div className="flex items-center gap-2">
+									<span className="font-medium">₹{p.amount.toLocaleString("en-IN")}</span>
+									<Badge variant={p.payment_date ? "default" : "secondary"}>
+										{p.payment_date ? "Paid" : "Pending"}
+									</Badge>
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+
+				<Separator />
 
 				<div className="space-y-1 text-sm">
 					<div className="flex items-center justify-between">
