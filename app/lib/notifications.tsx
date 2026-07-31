@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useAuth, type Role } from "~/lib/auth-context";
 
 export type NotificationType =
+	| "new_lead"
 	| "hot_lead"
 	| "task_overdue"
 	| "visa_expiring"
@@ -12,6 +13,7 @@ export type NotificationType =
 	| "no_activity";
 
 export const NOTIFICATION_TYPES: { id: NotificationType; label: string; description: string }[] = [
+	{ id: "new_lead", label: "New lead", description: "Any new lead submitted through the website." },
 	{ id: "hot_lead", label: "Hot lead", description: "A new lead scores 75+ and needs same-day outreach." },
 	{ id: "task_overdue", label: "Task overdue", description: "An open task has passed its due date." },
 	{ id: "visa_expiring", label: "Visa/passport expiring", description: "A traveler's visa or passport expires within 30 days." },
@@ -41,9 +43,9 @@ const SEED_EVENTS: NotificationEvent[] = [
 ];
 
 const DEFAULT_PREFS: Record<Role, Record<NotificationType, boolean>> = {
-	vedant: { hot_lead: true, task_overdue: true, visa_expiring: true, payment_received: true, payment_overdue: true, card_bill_due: true, no_activity: true },
-	kirti: { hot_lead: true, task_overdue: true, visa_expiring: true, payment_received: false, payment_overdue: false, card_bill_due: false, no_activity: true },
-	billing: { hot_lead: false, task_overdue: false, visa_expiring: false, payment_received: true, payment_overdue: true, card_bill_due: true, no_activity: false },
+	vedant: { new_lead: true, hot_lead: true, task_overdue: true, visa_expiring: true, payment_received: true, payment_overdue: true, card_bill_due: true, no_activity: true },
+	kirti: { new_lead: true, hot_lead: true, task_overdue: true, visa_expiring: true, payment_received: false, payment_overdue: false, card_bill_due: false, no_activity: true },
+	billing: { new_lead: false, hot_lead: false, task_overdue: false, visa_expiring: false, payment_received: true, payment_overdue: true, card_bill_due: true, no_activity: false },
 };
 
 const PREFS_KEY = "nomads-crm.notification-prefs";

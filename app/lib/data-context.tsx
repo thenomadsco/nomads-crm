@@ -143,11 +143,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
 						if (prev.some((l) => l.id === enriched.id)) return prev;
 						return [enriched, ...prev];
 					});
+					const dest = [newLead.destination, newLead.trip_category].filter(Boolean).join(" · ");
 					if (score >= 75) {
-						const dest = [newLead.destination, newLead.trip_category].filter(Boolean).join(" · ");
 						pushEventRef.current(
 							"hot_lead",
 							`Hot lead: ${newLead.name || "New lead"}`,
+							`Scored ${score}${dest ? ` · ${dest}` : ""}`,
+						);
+					} else {
+						pushEventRef.current(
+							"new_lead",
+							`New lead: ${newLead.name || "Unknown"}`,
 							`Scored ${score}${dest ? ` · ${dest}` : ""}`,
 						);
 					}
