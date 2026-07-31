@@ -88,7 +88,7 @@ function AppLayoutInner() {
 	return (
 		<SidebarProvider>
 			<Sidebar collapsible="icon">
-				<SidebarHeader className="px-3 py-3">
+				<SidebarHeader className="px-3 py-3" style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' }}>
 					<div className="flex items-center gap-2">
 						<img src="/icons/icon-192.png" alt="" className="h-8 w-8 rounded-md" />
 						<div className="flex flex-col leading-tight group-data-[collapsible=icon]:hidden">
@@ -143,7 +143,7 @@ function AppLayoutInner() {
 						</SidebarGroupContent>
 					</SidebarGroup>
 				</SidebarContent>
-				<SidebarFooter className="px-3 pb-3">
+				<SidebarFooter className="px-3 pb-3" style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}>
 					<SidebarMenu>
 						<SidebarMenuItem>
 							<SidebarMenuButton
@@ -180,7 +180,7 @@ function AppLayoutInner() {
 				</SidebarFooter>
 			</Sidebar>
 			<SidebarInset>
-				<header className="flex h-14 items-center justify-between gap-2 border-b px-4">
+				<header className="flex items-center justify-between gap-2 border-b px-4" style={{ paddingTop: 'env(safe-area-inset-top)', minHeight: 'calc(3.5rem + env(safe-area-inset-top))' }}>
 					<div className="flex items-center gap-2">
 						<SidebarTrigger />
 						<Separator orientation="vertical" className="h-5" />
