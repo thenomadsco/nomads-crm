@@ -77,6 +77,12 @@ function AppLayoutInner() {
 	const location = useLocation();
 	const pendingWork = usePendingWork();
 
+	useEffect(() => {
+		if (typeof Notification !== "undefined" && Notification.permission === "default") {
+			Notification.requestPermission();
+		}
+	}, []);
+
 	if (!user) return null;
 
 	const visibleNav = NAV.filter((item) => item.scope === "all" || user.scopes.includes(item.scope));

@@ -144,18 +144,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
 						return [enriched, ...prev];
 					});
 					const dest = [newLead.destination, newLead.trip_category].filter(Boolean).join(" · ");
-					if (score >= 75) {
-						pushEventRef.current(
-							"hot_lead",
-							`Hot lead: ${newLead.name || "New lead"}`,
-							`Scored ${score}${dest ? ` · ${dest}` : ""}`,
-						);
-					} else {
-						pushEventRef.current(
-							"new_lead",
-							`New lead: ${newLead.name || "Unknown"}`,
-							`Scored ${score}${dest ? ` · ${dest}` : ""}`,
-						);
+					const isHot = score >= 75;
+					const notifTitle = isHot
+						? `Hot lead: ${newLead.name || "New lead"}`
+						: `New lead: ${newLead.name || "Unknown"}`;
+					const notifBody = `Scored ${score}${dest ? ` · ${dest}` : ""}`;
+
+					pushEventRef.current(isHot ? "hot_lead" : "new_lead", notifTitle, notifBody);
+
+					// Native OS notification (works when app is backgrounded)
+					if (typeof Notification !== "undefined" && Notification.permission === "granted" && "serviceWorker" in navigator) {
+						navigator.serviceWorker.ready.then((reg) => {
+							reg.showNotification(notifTitle, {
+								body: notifBody,
+								icon: "/icons/icon-192.png",
+								badge: "/icons/icon-192.png",
+								tag: "new-lead",
+								renotify: true,
+							});
+						}).catch(() => {});
 					}
 				},
 			)
